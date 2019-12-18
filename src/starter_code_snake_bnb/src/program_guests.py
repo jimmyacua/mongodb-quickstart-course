@@ -1,3 +1,9 @@
+import datetime
+
+from colorama import Fore
+from dateutil import parser
+
+import services.data_service as svc
 from infrastructure.switchlang import switch
 import program_hosts as hosts
 import infrastructure.state as state
@@ -53,36 +59,131 @@ def show_commands():
 
 def add_a_snake():
     print(' ****************** Add a snake **************** ')
-    # TODO: Require an account
-    # TODO: Get snake info from user
-    # TODO: Create the snake in the DB.
+    if not state.active_account:
+        error_msg('You must login first to register a cage.')
+        return
 
-    print(" -------- NOT IMPLEMENTED -------- ")
+    name = input("What is your snake's name?")
+    if not name:
+        error_msg('Cancelled')
+        return
+
+    length = float(input('How long is your snake (in meter)? '))
+    specie = input('Specie? ')
+    is_venemous = input("Is your snake venemous [y]es, [n]o? ").lower().startswith('y')
+
+    snake = svc.add_snake(state.active_account, name, length, specie, is_venemous)
+    state.reload_account()
+    success_msg('Created {} with id {}'.format(snake.name, snake.id))
 
 
 def view_your_snakes():
     print(' ****************** Your snakes **************** ')
 
-    # TODO: Require an account
-    # TODO: Get snakes from DB, show details list
+    if not state.active_account:
+        error_msg('You must log in to view your snakes')
+        return
 
-    print(" -------- NOT IMPLEMENTED -------- ")
+    snakes = svc.get_snakes_for_user(state.active_account.id)
+    print("You have {} snakes".format(len(snakes)))
+    for s in snakes:
+        print("   * {} is a {} that is {}m long and is {}venomous".format(
+            s.name,
+            s.species,
+            s.length,
+            '' if s.is_venomous else 'not '
+        ))
 
 
 def book_a_cage():
     print(' ****************** Book a cage **************** ')
-    # TODO: Require an account
-    # TODO: Verify they have a snake
-    # TODO: Get dates and select snake
-    # TODO: Find cages available across date range
-    # TODO: Let user select cage to book.
 
-    print(" -------- NOT IMPLEMENTED -------- ")
+    if not state.active_account:
+        error_msg('You must log in to book a cage.')
+        return
+
+    snakes = svc.get_snakes_for_user(state.active_account.id)
+    if not snakes:
+        error_msg("You must first [a]dd a snake before you can book a cage.")
+        return
+
+    print("Let's start by finding available cages.")
+    start_text = input("Check-in date [yyyy-mm-dd]: ")
+    if not start_text:
+        error_msg("Cancelled")
+        return
+
+    checkin = parser.parse(
+        start_text
+    )
+
+    checkout = parser.parse(
+        input("Check-out date [yyyy-mm-dd]: ")
+    )
+
+    if checkin >= checkout:
+        error_msg("Check in must be before check out")
+        return
+
+    print()
+    for idx, s in enumerate(snakes):
+        print('{}. {} (length: {}, venomous: {})'.format(
+            idx + 1,
+            s.name,
+            s.length,
+            'yes' if s.is_venomous else 'no'
+        ))
+    snake = snakes[int(input("Which snake do you want to book (number)")) - 1]
+    cages = svc.get_available_cages(checkin, checkout, snake)
+
+    print("There are {} cages available in that time.".format(
+        len(cages)
+    ))
+
+    for idx, c in enumerate(cages):
+        print("{}. {} with {}m, carpeted: {}, has toys: {}.".format(
+            idx + 1,
+            c.name,
+            c.square_meters,
+            'yes' if c.is_carpeted else 'no',
+            'yes' if c.has_toys else 'no'
+        ))
+
+    if not cages:
+        error_msg("Sorry, no cages are available for that date.")
+        return
+
+    cage = cages[int(input("Which cage do you want to book (number)")) - 1]
+    svc.book_cage(state.active_account, snake, cage, checkin, checkout)
+    success_msg("Succesfully booked {} for {} at ${}/night.".format(
+        cage.name,
+        snake.name,
+        cage.price
+    ))
 
 
 def view_bookings():
     print(' ****************** Your bookings **************** ')
-    # TODO: Require an account
-    # TODO: List booking info along with snake info
+    if not state.active_account:
+        error_msg("You must log in first to register a cage")
+        return
 
-    print(" -------- NOT IMPLEMENTED -------- ")
+    snakes = {s.id: s for s in svc.get_snakes_for_user(state.active_account.id)}
+    bookings = svc.get_bookings_for_user(state.active_account.email)
+
+    print("You have {} bookings.".format(len(bookings)))
+    for b in bookings:
+        print(' * Snake: {} is booked at {} from {} for {} days.'.format(
+            snakes.get(b.guest_snake_id).name,
+            b.cage.name,
+            datetime.date(b.check_in_date.year, b.check_in_date.month, b.check_in_date.day),
+            (b.check_out_date - b.check_in_date).days
+        ))
+
+
+def error_msg(text):
+    print(Fore.LIGHTRED_EX + text + Fore.WHITE)
+
+
+def success_msg(text):
+    print(Fore.LIGHTGREEN_EX + text + Fore.WHITE)
